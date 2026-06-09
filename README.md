@@ -8,7 +8,7 @@ built by [voidrane](https://voidrane.nekoweb.org).
 
 ## what it does
 
-- **autonomous monologue** — claude haiku generates the character's speech in a continuous loop, maintaining context across utterances so it flows like a real stream-of-consciousness rather than disconnected fragments
+- **autonomous monologue** — an llm generates the character's speech in a continuous loop, maintaining context across utterances so it flows like a real stream-of-consciousness rather than disconnected fragments
 - **pipelined output** — while one utterance plays, the next is already being generated and synthesized in the background. the gap between speech is just your configured pause, not synthesis time
 - **lip sync** — amplitude is extracted from each audio file via ffmpeg and fed into vtuberstudio's parameter injection api, driving `MouthOpen` frame-by-frame in sync with playback
 - **obs subtitles** — current text is written to a file while speaking and cleared after. point an obs text source at it
@@ -31,7 +31,7 @@ ffmpeg    — lip sync amplitude extraction
 pip install -r requirements.txt
 ```
 
-`requirements.txt` pulls in: `anthropic`, `edge-tts`, `python-dotenv`, `websockets`
+`requirements.txt` pulls in: `anthropic`, `openai`, `edge-tts`, `python-dotenv`, `websockets`
 
 ---
 
@@ -48,9 +48,35 @@ cd tulpamancer
 cp .env.example .env
 ```
 
-open `.env` and fill in at minimum:
+open `.env` and fill in at minimum — pick one:
+
+**paid (anthropic, default):**
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**free (openrouter — free key at openrouter.ai):**
+```
+LLM_PROVIDER=openrouter
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+LLM_MODEL=meta-llama/llama-3.3-70b-instruct:free
+```
+
+**free (groq — free key at console.groq.com, very fast):**
+```
+LLM_PROVIDER=groq
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=gsk_...
+LLM_MODEL=llama-3.1-8b-instant
+```
+
+**free (ollama — local, no key needed):**
+```
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_API_KEY=ollama
+LLM_MODEL=llama3.2
 ```
 
 everything else runs on defaults. the character will speak immediately.
@@ -161,7 +187,10 @@ the double-buffer architecture means slots alternate: while slot a plays, slot b
 
 | variable | default | description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | — | required |
+| `LLM_PROVIDER` | `anthropic` | `anthropic` or any string for openai-compat path |
+| `ANTHROPIC_API_KEY` | — | required when `LLM_PROVIDER=anthropic` |
+| `LLM_API_KEY` | — | api key for openai-compatible providers |
+| `LLM_BASE_URL` | — | base url for openai-compatible api |
 | `CHARACTER_NAME` | `Tulpa` | display name |
 | `CHARACTER_SYSTEM_PROMPT` | (built-in) | full persona override; leave blank for default |
 | `TTS_VOICE` | `en-US-AnaNeural` | edge-tts voice |
@@ -178,7 +207,7 @@ the double-buffer architecture means slots alternate: while slot a plays, slot b
 | `SUBTITLE_PATH` | `/tmp/tulpamancer_sub.txt` | file obs reads for subtitles |
 | `TWITCH_CHANNEL` | — | channel name without # |
 | `SPEECH_INTERVAL` | `2.0` | seconds of silence between utterances |
-| `LLM_MODEL` | `claude-haiku-4-5-20251001` | anthropic model id |
+| `LLM_MODEL` | `claude-haiku-4-5-20251001` | model id (use provider's format for free options) |
 | `LLM_MAX_TOKENS` | `150` | max tokens per utterance (~2–3 sentences) |
 | `LLM_MAX_HISTORY` | `20` | conversation turns kept in context window |
 
@@ -190,7 +219,7 @@ the double-buffer architecture means slots alternate: while slot a plays, slot b
 python -m pytest tests/ -v
 ```
 
-32 tests covering:
+34 tests covering:
 - chat irc parsing (plain + irv3 tagged messages, edge cases)
 - lipsync amplitude extraction (against real synthesized audio)
 - llm text cleanup and trigger distribution
@@ -205,7 +234,7 @@ tulpamancer/
 ├── src/
 │   ├── main.py              — main loop, pipeline orchestration
 │   └── utils/
-│       ├── llm.py           — claude api wrapper, trigger phrases, history
+│       ├── llm.py           — llm client (anthropic + openai-compat), triggers, history
 │       ├── tts.py           — edge-tts synthesis
 │       ├── vtube.py         — vtuberstudio websocket client
 │       ├── lipsync.py       — amplitude extraction + vts parameter driver
