@@ -1,4 +1,5 @@
 import asyncio
+import os
 import struct
 import subprocess
 import tempfile
@@ -9,7 +10,8 @@ from pathlib import Path
 
 def extract_amplitudes(audio_path: str, fps: int = 24) -> list[float]:
     """Convert mp3 → wav via ffmpeg, compute per-frame RMS amplitude envelope."""
-    tmp = tempfile.mktemp(suffix=".wav")
+    fd, tmp = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
     try:
         subprocess.run(
             [

@@ -9,7 +9,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -48,12 +48,6 @@ class FakeWS:
         return [m["messageType"] for m in self.sent]
 
 
-def _ws_mod(ws: FakeWS) -> MagicMock:
-    m = MagicMock()
-    m.connect = AsyncMock(return_value=ws)
-    return m
-
-
 def _run(coro):
     return asyncio.run(coro)
 
@@ -64,7 +58,8 @@ def _make_client(ws: FakeWS, token_path: Path, **env) -> VTubeClient:
     defaults.update(env)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", token_path):
                 with patch.dict("os.environ", defaults):
                     c = VTubeClient()
@@ -109,9 +104,9 @@ def test_connect_stale_token_deletes_and_reauths(tmp_path):
 
     assert c.active
     assert ws.sent_types() == [
-        "AuthenticationRequest",    # stale attempt
+        "AuthenticationRequest",       # stale attempt
         "AuthenticationTokenRequest",  # request new
-        "AuthenticationRequest",    # fresh attempt
+        "AuthenticationRequest",       # fresh attempt
     ]
     assert not tp.exists() or tp.read_text() == "tok_abc123"
 
@@ -127,9 +122,10 @@ def test_connect_denied_token_sets_inactive(tmp_path):
 
 def test_connect_vts_unavailable_sets_inactive():
     async def go():
-        m = MagicMock()
-        m.connect = AsyncMock(side_effect=ConnectionRefusedError("no VTS"))
-        with patch.dict(sys.modules, {"websockets": m}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(
+                side_effect=ConnectionRefusedError("no VTS")
+            )
             c = VTubeClient()
             await c.connect()
             return c
@@ -145,7 +141,8 @@ def test_all_messages_have_required_vts_envelope(tmp_path):
     ws = FakeWS(TOKEN_RESP, AUTH_OK, ACK, ACK)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", tp):
                 c = VTubeClient()
                 await c.connect()
@@ -167,7 +164,8 @@ def test_trigger_hotkey_correct_format(tmp_path):
     ws = FakeWS(AUTH_OK, ACK)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", tp):
                 c = VTubeClient()
                 await c.connect()
@@ -185,7 +183,8 @@ def test_trigger_hotkey_blank_sends_nothing(tmp_path):
     ws = FakeWS(AUTH_OK)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", tp):
                 c = VTubeClient()
                 await c.connect()
@@ -201,7 +200,8 @@ def test_set_mouth_correct_format(tmp_path):
     ws = FakeWS(AUTH_OK, ACK)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", tp):
                 c = VTubeClient()
                 await c.connect()
@@ -224,7 +224,8 @@ def test_set_mouth_value_rounded_to_3dp(tmp_path):
     ws = FakeWS(AUTH_OK, ACK)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", tp):
                 c = VTubeClient()
                 await c.connect()
@@ -244,20 +245,23 @@ def test_set_mouth_inactive_does_not_send():
     _run(go())  # passes if no exception
 
 
-def test_disconnect_closes_ws(tmp_path):
+def test_disconnect_sets_active_false(tmp_path):
     tp = tmp_path / "token.txt"
     tp.write_text("tok")
     ws = FakeWS(AUTH_OK)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", tp):
                 c = VTubeClient()
                 await c.connect()
+                assert c.active
                 await c.disconnect()
+                return c
 
-    _run(go())
-    # if ws.close() was called, FakeWS doesn't raise — verifying it runs clean
+    c = _run(go())
+    assert not c.active
 
 
 def test_token_written_only_on_success(tmp_path):
@@ -265,7 +269,8 @@ def test_token_written_only_on_success(tmp_path):
     ws = FakeWS(TOKEN_DENIED)
 
     async def go():
-        with patch.dict(sys.modules, {"websockets": _ws_mod(ws)}):
+        with patch("utils.vtube.websockets") as mock_ws:
+            mock_ws.connect = AsyncMock(return_value=ws)
             with patch.object(vtube_mod, "TOKEN_PATH", tp):
                 c = VTubeClient()
                 await c.connect()

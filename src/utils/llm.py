@@ -1,7 +1,7 @@
+import anthropic
 import os
 import random
 import re
-import anthropic
 
 DEFAULT_SYSTEM = (
     "You are {name}, an autonomous AI vtuber who exists at the boundary"
@@ -30,13 +30,15 @@ _TRIGGERS = [
     ("[next — you sit with the silence a moment]", 5),
 ]
 
-_TRIGGER_POOL = [t for t, w in _TRIGGERS for _ in range(w)]
+_TRIGGER_PHRASES = [t for t, _ in _TRIGGERS]
+_TRIGGER_WEIGHTS = [w for _, w in _TRIGGERS]
 
-_STAGE_DIRECTION = re.compile(r"[\*\(][^\*\)]{1,40}[\*\)]")
+# Separate patterns per delimiter so *foo) is not matched as a stage direction
+_STAGE_DIRECTION = re.compile(r"\*[^*]{1,60}\*|\([^)]{1,60}\)")
 
 
 def _pick_trigger() -> str:
-    return random.choice(_TRIGGER_POOL)
+    return random.choices(_TRIGGER_PHRASES, weights=_TRIGGER_WEIGHTS)[0]
 
 
 def _clean(text: str) -> str:
@@ -60,18 +62,15 @@ class LLMClient:
     def generate(self, context: str | None = None) -> str:
         trigger = context or _pick_trigger()
         self._history.append({"role": "user", "content": trigger})
+        self._history = self._history[-self.max_history:]
 
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             system=self.system,
-            messages=self._history[-self.max_history:],
+            messages=self._history,
         )
 
         text = _clean(response.content[0].text)
         self._history.append({"role": "assistant", "content": text})
-
-        if len(self._history) > self.max_history:
-            self._history = self._history[-self.max_history:]
-
         return text

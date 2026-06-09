@@ -1,7 +1,9 @@
-import os
 import json
+import os
 import uuid
 from pathlib import Path
+
+import websockets
 
 TOKEN_PATH = Path.home() / ".config" / "tulpamancer" / "vts_token.txt"
 
@@ -13,16 +15,12 @@ class VTubeClient:
         self.plugin_name = os.getenv("VTS_PLUGIN_NAME", "tulpamancer")
         self.talking_hotkey = os.getenv("VTS_TALKING_HOTKEY", "")
         self.idle_hotkey = os.getenv("VTS_IDLE_HOTKEY", "")
+        self._uri = f"ws://{self.host}:{self.port}"
         self._ws = None
         self.active = False
 
-    @property
-    def _uri(self) -> str:
-        return f"ws://{self.host}:{self.port}"
-
     async def connect(self) -> None:
         try:
-            import websockets
             self._ws = await websockets.connect(self._uri)
             await self._authenticate()
             self.active = True
@@ -36,7 +34,7 @@ class VTubeClient:
             "apiVersion": "1.0",
             "requestID": uuid.uuid4().hex[:8],
             "messageType": message_type,
-            "data": data or {},
+            "data": data if data is not None else {},
         }
         await self._ws.send(json.dumps(payload))
         return json.loads(await self._ws.recv())
@@ -69,7 +67,6 @@ class VTubeClient:
 
         authenticated = resp.get("data", {}).get("authenticated", False)
         if not authenticated:
-            # Stale token — nuke it and get a fresh one
             TOKEN_PATH.unlink(missing_ok=True)
             token = await self._request_token()
             await self._send("AuthenticationRequest", {
@@ -105,5 +102,6 @@ class VTubeClient:
             pass
 
     async def disconnect(self) -> None:
+        self.active = False
         if self._ws:
             await self._ws.close()

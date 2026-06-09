@@ -17,6 +17,13 @@ SLOTS = [
 ]
 
 
+def _write_subtitle(path: Path, text: str) -> None:
+    try:
+        path.write_text(text)
+    except OSError:
+        pass
+
+
 async def play_audio(path: Path) -> None:
     proc = await asyncio.create_subprocess_exec(
         "mpv", "--no-terminal", "--no-video", str(path),
@@ -24,6 +31,8 @@ async def play_audio(path: Path) -> None:
         stderr=asyncio.subprocess.DEVNULL,
     )
     await proc.wait()
+    if proc.returncode != 0:
+        print(f"[audio] mpv exited {proc.returncode} for {path.name}")
 
 
 async def prepare(
@@ -89,11 +98,7 @@ async def main() -> None:
                 prepare(llm, tts, SLOTS[next_slot], lipsync_fps, lipsync, chat_ctx)
             )
 
-            try:
-                subtitle_path.write_text(text)
-            except OSError:
-                pass
-
+            _write_subtitle(subtitle_path, text)
             print(f"[{name}] {text}\n")
             await vtube.trigger_talking()
             await asyncio.gather(
@@ -101,11 +106,7 @@ async def main() -> None:
                 drive(frames, vtube, lipsync_fps),
             )
             await vtube.trigger_idle()
-
-            try:
-                subtitle_path.write_text("")
-            except OSError:
-                pass
+            _write_subtitle(subtitle_path, "")
 
             await asyncio.sleep(interval)
 
@@ -127,10 +128,7 @@ async def main() -> None:
     except (KeyboardInterrupt, asyncio.CancelledError):
         if next_task and not next_task.done():
             next_task.cancel()
-        try:
-            subtitle_path.write_text("")
-        except OSError:
-            pass
+        _write_subtitle(subtitle_path, "")
         print(f"\n[tulpamancer] {name} goes quiet.")
     finally:
         await chat.stop()
