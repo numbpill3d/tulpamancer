@@ -1,4 +1,3 @@
-import anthropic
 import os
 import random
 import re
@@ -48,7 +47,6 @@ def _clean(text: str) -> str:
 
 class LLMClient:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         self.model = os.getenv("LLM_MODEL", "claude-haiku-4-5-20251001")
         self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "150"))
         self.max_history = int(os.getenv("LLM_MAX_HISTORY", "20")) * 2
@@ -59,18 +57,41 @@ class LLMClient:
         )
         self._history: list[dict] = []
 
+        provider = os.getenv("LLM_PROVIDER", "anthropic").lower()
+        if provider == "anthropic":
+            import anthropic
+            self._anthropic = anthropic.Anthropic(
+                api_key=os.environ["ANTHROPIC_API_KEY"]
+            )
+            self._openai_client = None
+        else:
+            import openai
+            self._openai_client = openai.OpenAI(
+                base_url=os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1"),
+                api_key=os.environ["LLM_API_KEY"],
+            )
+            self._anthropic = None
+
+    def _call(self, messages: list[dict]) -> str:
+        if self._anthropic is not None:
+            resp = self._anthropic.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                system=self.system,
+                messages=messages,
+            )
+            return resp.content[0].text
+        resp = self._openai_client.chat.completions.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            messages=[{"role": "system", "content": self.system}, *messages],
+        )
+        return resp.choices[0].message.content or ""
+
     def generate(self, context: str | None = None) -> str:
         trigger = context or _pick_trigger()
         self._history.append({"role": "user", "content": trigger})
         self._history = self._history[-self.max_history:]
-
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=self.system,
-            messages=self._history,
-        )
-
-        text = _clean(response.content[0].text)
+        text = _clean(self._call(self._history))
         self._history.append({"role": "assistant", "content": text})
         return text
