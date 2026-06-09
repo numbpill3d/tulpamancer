@@ -1,0 +1,4 @@
+anthropic
+edge-tts
+python-dotenv
+websockets
