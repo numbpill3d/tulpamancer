@@ -49,9 +49,10 @@ class VTubeClient:
             "pluginIcon": None,
         })
         token = resp.get("data", {}).get("authenticationToken", "")
-        if token:
-            TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-            TOKEN_PATH.write_text(token)
+        if not token:
+            raise RuntimeError("VTubeStudio denied plugin access or returned no token")
+        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_PATH.write_text(token)
         return token
 
     async def _authenticate(self) -> None:

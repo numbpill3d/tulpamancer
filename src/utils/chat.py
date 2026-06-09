@@ -61,8 +61,10 @@ class ChatClient:
 
 def _parse_privmsg(raw: str) -> tuple[str, str]:
     try:
-        user = raw.split("!")[0].lstrip(":")
-        msg = raw.split("PRIVMSG", 1)[1].split(":", 1)[1].strip()
+        # Strip IRCv3 tags (@key=val;...) if present — strip to first " :"
+        line = raw.split(" :", 1)[1] if raw.startswith("@") else raw
+        user = line.split("!")[0].lstrip(":")
+        msg = line.split("PRIVMSG", 1)[1].split(":", 1)[1].strip()
         return user, msg
     except (IndexError, ValueError):
         return "", ""
