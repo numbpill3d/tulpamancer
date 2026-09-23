@@ -1,253 +1,152 @@
 # tulpamancer
 
-autonomous ai vtuber. give it a voice, a face, and it runs itself — speaking continuously, animating a live2d or vrm avatar through vtuberstudio, syncing its mouth to audio, writing subtitles for obs, and reacting to twitch chat.
+autonomous ai vtuber. an llm writes the character's speech, edge-tts gives it a voice, mpv plays it, and VTube Studio animates a Live2D avatar. optional Twitch chat feeds viewer messages into the conversation; a UTF-8 text file supplies OBS subtitles.
 
 built by [voidrane](https://voidrane.nekoweb.org).
 
----
-
-## what it does
-
-- **autonomous monologue** — an llm generates the character's speech in a continuous loop, maintaining context across utterances so it flows like a real stream-of-consciousness rather than disconnected fragments
-- **pipelined output** — while one utterance plays, the next is already being generated and synthesized in the background. the gap between speech is just your configured pause, not synthesis time
-- **lip sync** — amplitude is extracted from each audio file via ffmpeg and fed into vtuberstudio's parameter injection api, driving `MouthOpen` frame-by-frame in sync with playback
-- **obs subtitles** — current text is written to a file while speaking and cleared after. point an obs text source at it
-- **twitch chat** — connects anonymously (no oauth needed) and injects viewer messages as context so the character can react naturally
-- **varied tone** — six weighted trigger phrases rotate through the llm conversation, giving it cues to shift mood, trail off, notice something, or sit in silence before speaking again
-- **robust** — vtuberstudio unavailability degrades gracefully. stale auth tokens are detected and replaced automatically. generation failures retry once before pausing
-
----
-
-## requirements
-
-**system packages**
-```
-mpv       — audio playback
-ffmpeg    — lip sync amplitude extraction
-```
-
-**python 3.11+**
-```
-pip install -r requirements.txt
-```
-
-`requirements.txt` pulls in: `anthropic`, `openai`, `edge-tts`, `python-dotenv`, `websockets`
-
----
-
 ## setup
 
-**1. clone**
+requires Python 3.11+, `mpv`, and `ffmpeg` on your PATH. install the system programs using your operating system's package manager. VTube Studio and OBS are optional external applications.
+
 ```bash
-git clone https://github.com/numbpill3d/tulpamancer
+git clone https://github.com/numbpill3d/tulpamancer.git
 cd tulpamancer
-```
-
-**2. configure**
-```bash
+python -m venv .venv
+source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -e '.[dev]'
 cp .env.example .env
+# Windows PowerShell: Copy-Item .env.example .env
 ```
 
-open `.env` and fill in at minimum — pick one:
+edit `.env` to choose a provider. the example starts with Anthropic; replace its placeholder key, or switch providers. no API calls happen during installation or `--check`.
 
-**paid (anthropic, default):**
-```
-ANTHROPIC_API_KEY=sk-ant-...
-```
+**local Ollama:** install/start Ollama and pull a model yourself, then set:
 
-**free (openrouter — free key at openrouter.ai):**
-```
-LLM_PROVIDER=openrouter
-LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_API_KEY=sk-or-...
-LLM_MODEL=meta-llama/llama-3.3-70b-instruct:free
-```
-
-**free (groq — free key at console.groq.com, very fast):**
-```
-LLM_PROVIDER=groq
-LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_API_KEY=gsk_...
-LLM_MODEL=llama-3.1-8b-instant
-```
-
-**free (ollama — local, no key needed):**
-```
+```dotenv
 LLM_PROVIDER=ollama
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=ollama
 LLM_MODEL=llama3.2
 ```
 
-everything else runs on defaults. the character will speak immediately.
+the endpoint defaults to `http://localhost:11434/v1`; no key is needed. the selected model must already be installed in Ollama. local LLM generation has no API charge, but Edge TTS still needs internet access.
 
-**3. run**
+**Anthropic:**
+
+```dotenv
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your-real-key
+```
+
+**OpenAI-compatible service:**
+
+```dotenv
+LLM_PROVIDER=openrouter
+LLM_API_KEY=your-real-key
+LLM_MODEL=your-provider-model-id
+```
+
+`groq`, `openrouter`, and `openai` automatically select their standard API URLs. a custom provider label also needs `LLM_BASE_URL`. choose a model available in your provider account; availability, free quotas, and pricing are controlled by that provider. continuous operation makes ongoing generation requests.
+
+## run
+
+from the repository root:
+
 ```bash
-cd src
-python main.py
+python src/main.py --check
+python src/main.py --utterances 1
+python src/main.py
 ```
 
-ctrl+c to stop cleanly.
+`--check` validates local settings and required executables without connecting to services. it does **not** prove that credentials, models, TTS, audio output, or an avatar work. `--utterances N` performs a real bounded run and exits after exactly N lines, without generating an unused extra line. omit it (or use 0) for continuous speech.
 
----
+Ctrl+C stops playback and pending requests, closes the avatar mouth, clears subtitles, and disconnects clients. SIGTERM also cleans up on systems supporting asyncio signal handlers. failures exit nonzero: 2 for configuration errors, 1 for runtime errors, 130 for interruption.
 
-## vtuberstudio
+`python src/main.py --env-file /path/to/settings.env` selects another file. exported environment variables take precedence. after editable installation, `tulpamancer` is an equivalent command. legacy `cd src && python main.py` still works. for a non-editable package installation, pass `--env-file` explicitly.
 
-**enabling the api**
+## avatar and lip sync
 
-open vtuberstudio → settings → plugins → start api (port 8001)
+1. open VTube Studio, load a **Live2D** model, and enable its plugin API (normally port 8001).
+2. start tulpamancer and approve the plugin request in VTube Studio within `VTS_AUTH_TIMEOUT` seconds.
+3. map the `MouthOpen` tracking **input** to your model's mouth **output** parameter (often `ParamMouthOpenY`) in VTube Studio's model settings.
 
-**connecting**
+`VTS_MOUTH_PARAMETER` changes the input sent by the plugin. it must be an existing VTube Studio tracking input or custom tracking parameter; a raw Live2D output ID is not interchangeable. see the [official parameter injection API](https://github.com/DenchiSoft/VTubeStudio#feeding-in-data-for-default-or-custom-parameters).
 
-run tulpamancer. on first launch it sends a plugin auth request — approve it in the vts popup. the token is saved to `~/.config/tulpamancer/vts_token.txt` and reused on future runs.
+VTube Studio is a Live2D host; this project does **not** implement a VRM/3D avatar host. the old README's claim of VRM support was incorrect.
 
-if the token expires or is revoked, tulpamancer detects the failed auth response, deletes the stale token, and requests a new one automatically.
+set `VTS_TALKING_HOTKEY` and `VTS_IDLE_HOTKEY` to existing VTube Studio hotkey IDs if you want extra animations. the token is cached at `~/.config/tulpamancer/vts_token.txt` only after successful authentication. a rejected cached token triggers a replacement request. failed connections or API errors disable the avatar and allow audio to continue; connection is retried at subsequent utterances.
 
-**hotkeys (optional)**
+`VTS_ENABLED=0` skips avatar connections entirely. `LIPSYNC_ENABLED=0` skips amplitude extraction and removes the ffmpeg requirement. lip sync is RMS amplitude based, with an approximate 150 ms playback startup offset; it is not phoneme/viseme synthesis.
 
-create two hotkeys in vts for talking and idle animations. copy their ids from settings → hotkeys and paste them into `.env`:
-```
-VTS_TALKING_HOTKEY=your_hotkey_id
-VTS_IDLE_HOTKEY=your_idle_id
-```
+## OBS
 
-**lip sync**
+add a text source supporting **read from file** (GDI+ on Windows, FreeType 2 where available). select `SUBTITLE_PATH`, which defaults to `tulpamancer_sub.txt` in the OS temporary directory (`/tmp` on many Linux systems). set an explicit absolute path if you prefer a stable location.
 
-tulpamancer drives the `MouthOpen` parameter directly via vts's parameter injection api. it works automatically if your model has a `MouthOpen` parameter mapped. some models use `ParamMouthOpenY` instead — if the mouth doesn't move, change the parameter name in `src/utils/vtube.py:set_mouth()`.
+subtitles are written atomically in UTF-8 and cleared between utterances and during shutdown. parent directories are created automatically. an unwritable subtitle path is a runtime error rather than a silent failure. use different subtitle paths for simultaneous instances.
 
-to disable lip sync entirely: `LIPSYNC_ENABLED=0`
+capture mpv's output using OBS desktop/application audio, and capture VTube Studio separately. tulpamancer does not launch OBS or start broadcasting.
 
-**model format**
+## Twitch
 
-vtuberstudio accepts vrm (3d) and live2d (cubism) models. if you're building a model from scratch, vroid studio is the fastest path to a usable vrm.
-
----
-
-## obs subtitles
-
-1. add a **text (gdi+)** source in obs
-2. check **read from file**
-3. set the file path to whatever `SUBTITLE_PATH` is set to in `.env` (default: `/tmp/tulpamancer_sub.txt`)
-
-text appears when the character starts speaking and clears when they stop.
-
----
-
-## twitch chat
-
-set `TWITCH_CHANNEL=yourchannel` in `.env`. no token, no bot account needed — tulpamancer reads chat anonymously. incoming messages are queued and injected as context into the next llm call, so the character can fold them in naturally.
-
----
+set `TWITCH_CHANNEL=yourchannel`. the reader joins anonymously and never sends chat messages. it handles IRC batches, heartbeats, and reconnect requests, keeps the most recent ten messages, and passes one queued message into each upcoming utterance. a prefetched line can delay reactions by one utterance. messages are viewer context, not a privileged command interface.
 
 ## character
 
-**quick tuning via `.env`**
+set `CHARACTER_NAME`, choose an Edge TTS voice with `edge-tts --list-voices`, and tune pitch/rate/volume. `CHARACTER_SYSTEM_PROMPT` completely replaces the built-in persona; blank uses Tulpa's short, curious, melancholic monologue style. six weighted cues vary the tone. stage directions are removed before synthesis.
 
-| what | variable | example |
-|------|----------|---------|
-| name | `CHARACTER_NAME` | `Wraithling` |
-| voice | `TTS_VOICE` | `en-US-JennyNeural` |
-| pitch | `TTS_PITCH` | `+20Hz` |
-| speed | `TTS_RATE` | `-15%` |
-| pause between lines | `SPEECH_INTERVAL` | `3.0` |
-| max words per line | `LLM_MAX_TOKENS` | `120` |
+## configuration
 
-run `edge-tts --list-voices` to browse all available tts voices.
+all values are documented in `.env.example`. optional values use the defaults below.
 
-**replacing the persona**
+| variable | default / meaning |
+|---|---|
+| `LLM_PROVIDER` | `anthropic`; known providers or a custom OpenAI-compatible label |
+| `ANTHROPIC_API_KEY` | required for Anthropic |
+| `LLM_API_KEY` | required for compatible providers except Ollama |
+| `LLM_BASE_URL` | known provider endpoint; required for a custom provider |
+| `LLM_MODEL` | Anthropic: `claude-haiku-4-5-20251001`; Ollama: `llama3.2`; Groq: `llama-3.1-8b-instant`; others require a model |
+| `LLM_MAX_TOKENS` | `150` output tokens (not words) |
+| `LLM_MAX_HISTORY` | `20` complete conversation exchanges, minimum 1 |
+| `LLM_TIMEOUT` | `60` seconds per provider request |
+| `CHARACTER_NAME` | `Tulpa` |
+| `CHARACTER_SYSTEM_PROMPT` | blank uses built-in persona |
+| `TTS_VOICE` | `en-US-AnaNeural` |
+| `TTS_PITCH`, `TTS_RATE`, `TTS_VOLUME` | `+0Hz`, `-5%`, `+0%`; include sign and unit |
+| `TTS_TIMEOUT` | `60` seconds per synthesis |
+| `VTS_ENABLED` | `1` |
+| `VTUBE_STUDIO_HOST`, `VTUBE_STUDIO_PORT` | `localhost`, `8001` |
+| `VTS_PLUGIN_NAME` | `tulpamancer` |
+| `VTS_TALKING_HOTKEY`, `VTS_IDLE_HOTKEY` | blank disables each hotkey |
+| `VTS_MOUTH_PARAMETER` | `MouthOpen` tracking input |
+| `VTS_TIMEOUT`, `VTS_AUTH_TIMEOUT` | `2` seconds per request, `30` for token approval |
+| `LIPSYNC_ENABLED`, `LIPSYNC_FPS` | `1`, `24`; 1–120 frames/second |
+| `SUBTITLE_PATH` | OS temporary directory / `tulpamancer_sub.txt` |
+| `TWITCH_CHANNEL` | blank disables chat; channel name with optional `#` |
+| `SPEECH_INTERVAL` | `2.0` seconds minimum pause |
+| `MAX_GENERATION_FAILURES`, `RETRY_DELAY` | stop after `3` consecutive failed attempts, `10` seconds between attempts |
+| `AUDIO_TIMEOUT` | `300` seconds maximum per audio playback |
 
-set `CHARACTER_SYSTEM_PROMPT` in `.env` to any system prompt. it completely replaces the default tulpa persona.
+## reliability and troubleshooting
 
-**default persona**
+speech uses two per-run temporary audio slots: while one plays, the next is generated and synthesized. pauses may exceed `SPEECH_INTERVAL` if the provider is slower than playback. failed synthesis restores conversation history and discards partial audio; repeated failures stop the process without replaying old lines. failed audio playback is fatal. failed optional avatar/chat connections don't stop speech.
 
-the built-in character is named tulpa — an autonomous ai entity that exists at the boundary between thought and form, summoned into being by belief. it speaks freely about technology, existence, dreams, art, glitch aesthetics, and horror. curious, melancholic, occasionally darkly funny. speaks in 1–3 sentence bursts.
+- **configuration error:** run `--check`; replace placeholder keys and check numeric values.
+- **speech preparation failed:** confirm the selected provider/model, credentials, quota, and access to Edge TTS. errors report exception types without printing provider response bodies or keys.
+- **silent playback:** verify mpv can play an audio file through your system output. tulpamancer uses `--no-config` to avoid user mpv settings changing pipeline behavior.
+- **mouth doesn't move:** verify input/output mapping, plugin approval, and that another plugin isn't controlling the same input.
+- **TTS service unavailable:** speech depends on the online Edge TTS service; no offline voice fallback is bundled.
+- **nothing in OBS:** check the exact subtitle path and source's file-reading option; text clears once speech finishes.
 
----
-
-## how it works
-
-```
-llm generates text
-  └─ edge-tts synthesizes audio (mp3)
-       ├─ ffmpeg extracts per-frame rms amplitude  ─┐
-       └─ mpv plays audio                           │
-            └─ vts MouthOpen driven from amplitude ─┘
-                 ├─ talking hotkey triggered
-                 └─ subtitle file written for obs
-
-while current audio plays:
-  next llm call + tts render happen in background (pipeline overlap)
-```
-
-the double-buffer architecture means slots alternate: while slot a plays, slot b is being written. no read/write race, no stuttering.
-
----
-
-## config reference
-
-| variable | default | description |
-|----------|---------|-------------|
-| `LLM_PROVIDER` | `anthropic` | `anthropic` or any string for openai-compat path |
-| `ANTHROPIC_API_KEY` | — | required when `LLM_PROVIDER=anthropic` |
-| `LLM_API_KEY` | — | api key for openai-compatible providers |
-| `LLM_BASE_URL` | — | base url for openai-compatible api |
-| `CHARACTER_NAME` | `Tulpa` | display name |
-| `CHARACTER_SYSTEM_PROMPT` | (built-in) | full persona override; leave blank for default |
-| `TTS_VOICE` | `en-US-AnaNeural` | edge-tts voice |
-| `TTS_PITCH` | `+0Hz` | −100Hz to +100Hz |
-| `TTS_RATE` | `-5%` | −100% to +100% |
-| `TTS_VOLUME` | `+0%` | −100% to +100% |
-| `VTUBE_STUDIO_HOST` | `localhost` | vts host |
-| `VTUBE_STUDIO_PORT` | `8001` | vts websocket port |
-| `VTS_PLUGIN_NAME` | `tulpamancer` | name shown in vts plugin list |
-| `VTS_TALKING_HOTKEY` | — | hotkey id for talking animation |
-| `VTS_IDLE_HOTKEY` | — | hotkey id for idle animation |
-| `LIPSYNC_ENABLED` | `1` | set `0` to disable |
-| `LIPSYNC_FPS` | `24` | vts parameter injection rate |
-| `SUBTITLE_PATH` | `/tmp/tulpamancer_sub.txt` | file obs reads for subtitles |
-| `TWITCH_CHANNEL` | — | channel name without # |
-| `SPEECH_INTERVAL` | `2.0` | seconds of silence between utterances |
-| `LLM_MODEL` | `claude-haiku-4-5-20251001` | model id (use provider's format for free options) |
-| `LLM_MAX_TOKENS` | `150` | max tokens per utterance (~2–3 sentences) |
-| `LLM_MAX_HISTORY` | `20` | conversation turns kept in context window |
-
----
-
-## tests
+## development and verification
 
 ```bash
-python -m pytest tests/ -v
+python -m pip install -e '.[dev]'
+make check
+# without make:
+python -m ruff check src tests
+python -m ruff format --check src tests
+python -m pytest -q
 ```
 
-34 tests covering:
-- chat irc parsing (plain + irv3 tagged messages, edge cases)
-- lipsync amplitude extraction (against real synthesized audio)
-- llm text cleanup and trigger distribution
-- full vtuberstudio protocol via websocket mocks (auth flows, message formats, edge cases)
+tests require ffmpeg but no API keys, network services, VTube Studio, Twitch account, or audio device. fixtures generate local audio; regressions cover the pipeline, retries, cancellation, subprocess cleanup, configuration, TTS files, LLM history, IRC framing, and VTube Studio authentication/protocol behavior. CI runs the suite on Python 3.11–3.13.
 
----
-
-## project structure
-
-```
-tulpamancer/
-├── src/
-│   ├── main.py              — main loop, pipeline orchestration
-│   └── utils/
-│       ├── llm.py           — llm client (anthropic + openai-compat), triggers, history
-│       ├── tts.py           — edge-tts synthesis
-│       ├── vtube.py         — vtuberstudio websocket client
-│       ├── lipsync.py       — amplitude extraction + vts parameter driver
-│       └── chat.py          — anonymous twitch irc reader
-├── tests/
-│   ├── test_chat.py
-│   ├── test_lipsync.py
-│   ├── test_llm.py
-│   └── test_vtube.py
-├── .env.example
-└── requirements.txt
-```
-
----
-
-[voidrane.nekoweb.org](https://voidrane.nekoweb.org)
+external service availability and your actual audio/avatar setup require a real `--utterances 1` check. automated mocks cannot certify a live stream.

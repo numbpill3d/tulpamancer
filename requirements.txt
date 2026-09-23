@@ -1,5 +1,5 @@
-anthropic
-openai
-edge-tts
-python-dotenv
-websockets
+anthropic>=0.40,<2
+openai>=1.55,<4
+edge-tts>=7,<8
+python-dotenv>=1,<2
+websockets>=13,<18

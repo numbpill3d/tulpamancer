@@ -7,3 +7,7 @@ build/
 .venv/
 venv/
 ~/.config/tulpamancer/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/

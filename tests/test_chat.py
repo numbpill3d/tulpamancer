@@ -40,3 +40,44 @@ def test_whitespace_stripped():
     raw = ":dave!dave@dave.tmi.twitch.tv PRIVMSG #chan :  leading space"
     _, msg = _parse_privmsg(raw)
     assert msg == "leading space"
+
+
+def test_batch_handles_ping_and_all_messages():
+    import asyncio
+    from unittest.mock import AsyncMock
+    from utils.chat import ChatClient
+
+    client = ChatClient()
+    ws = AsyncMock()
+    asyncio.run(
+        client._handle_frame(
+            "PING :heartbeat\r\n:alice!a@host PRIVMSG #chan :one\r\n"
+            ":bob!b@host PRIVMSG #chan :two\r\n",
+            ws,
+        )
+    )
+    ws.send.assert_awaited_once_with("PONG :heartbeat\r\n")
+    assert client.pop() == "[chat: alice: one]"
+    assert client.pop() == "[chat: bob: two]"
+    assert client.pop() is None
+
+
+def test_privmsg_in_message_is_not_a_command():
+    assert _parse_privmsg(":server NOTICE #chan :PRIVMSG :spoof") == ("", "")
+
+
+def test_channel_normalized(monkeypatch):
+    from utils.chat import ChatClient
+
+    monkeypatch.setenv("TWITCH_CHANNEL", " #SomeChannel ")
+    assert ChatClient().channel == "somechannel"
+
+
+def test_reconnect_message_requests_new_connection():
+    import asyncio
+    import pytest
+    from unittest.mock import AsyncMock
+    from utils.chat import ChatClient
+
+    with pytest.raises(ConnectionError):
+        asyncio.run(ChatClient()._handle_frame(":tmi.twitch.tv RECONNECT", AsyncMock()))
