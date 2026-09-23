@@ -1,3 +1,4 @@
+import asyncio
 import os
 import random
 import re
@@ -47,51 +48,72 @@ def _clean(text: str) -> str:
 
 class LLMClient:
     def __init__(self):
-        self.model = os.getenv("LLM_MODEL", "claude-haiku-4-5-20251001")
-        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "150"))
-        self.max_history = int(os.getenv("LLM_MAX_HISTORY", "20")) * 2
-        self.name = os.getenv("CHARACTER_NAME", "Tulpa")
-        self.system = (
-            os.getenv("CHARACTER_SYSTEM_PROMPT")
-            or DEFAULT_SYSTEM.format(name=self.name)
-        )
-        self._history: list[dict] = []
+        from utils.config import LLMSettings
 
-        provider = os.getenv("LLM_PROVIDER", "anthropic").lower()
-        if provider == "anthropic":
+        settings = LLMSettings.from_env()
+        self.timeout = settings.timeout
+        self.model = settings.model
+        self.max_tokens = settings.max_tokens
+        self.max_history = settings.max_history
+        self.name = os.getenv("CHARACTER_NAME", "Tulpa")
+        self.system = os.getenv("CHARACTER_SYSTEM_PROMPT") or DEFAULT_SYSTEM.format(name=self.name)
+        self._history: list[dict] = []
+        self._anthropic = None
+        self._openai_client = None
+        # Async clients make Ctrl+C cancel in-flight requests immediately.
+        # Retries belong to the pipeline, not nested SDK retry loops.
+        if settings.provider == "anthropic":
             import anthropic
-            self._anthropic = anthropic.Anthropic(
-                api_key=os.environ["ANTHROPIC_API_KEY"]
+
+            self._anthropic = anthropic.AsyncAnthropic(
+                api_key=settings.api_key,
+                timeout=settings.timeout,
+                max_retries=0,
             )
-            self._openai_client = None
         else:
             import openai
-            self._openai_client = openai.OpenAI(
-                base_url=os.getenv("LLM_BASE_URL", "https://openrouter.ai/api/v1"),
-                api_key=os.environ["LLM_API_KEY"],
-            )
-            self._anthropic = None
 
-    def _call(self, messages: list[dict]) -> str:
+            self._openai_client = openai.AsyncOpenAI(
+                base_url=settings.base_url,
+                api_key=settings.api_key,
+                timeout=settings.timeout,
+                max_retries=0,
+            )
+
+    async def _call(self, messages: list[dict]) -> str:
         if self._anthropic is not None:
-            resp = self._anthropic.messages.create(
+            resp = await self._anthropic.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=self.system,
                 messages=messages,
             )
-            return resp.content[0].text
-        resp = self._openai_client.chat.completions.create(
+            return " ".join(block.text for block in resp.content if block.type == "text")
+        resp = await self._openai_client.chat.completions.create(
             model=self.model,
             max_tokens=self.max_tokens,
             messages=[{"role": "system", "content": self.system}, *messages],
         )
         return resp.choices[0].message.content or ""
 
-    def generate(self, context: str | None = None) -> str:
-        trigger = context or _pick_trigger()
-        self._history.append({"role": "user", "content": trigger})
-        self._history = self._history[-self.max_history:]
-        text = _clean(self._call(self._history))
-        self._history.append({"role": "assistant", "content": text})
+    async def generate(self, context: str | None = None) -> str:
+        # Retain complete user/assistant pairs; failed calls never poison history.
+        history = self._history[-2 * (self.max_history - 1) :] if self.max_history > 1 else []
+        messages = [*history, {"role": "user", "content": context or _pick_trigger()}]
+        async with asyncio.timeout(self.timeout):
+            text = _clean(await self._call(messages))
+        if not text:
+            raise RuntimeError("LLM returned no speakable text")
+        self._history = [*messages, {"role": "assistant", "content": text}]
         return text
+
+    def snapshot(self) -> list[dict]:
+        return list(self._history)
+
+    def restore(self, history: list[dict]) -> None:
+        self._history = list(history)
+
+    async def close(self) -> None:
+        client = self._anthropic or self._openai_client
+        if client is not None:
+            await client.close()

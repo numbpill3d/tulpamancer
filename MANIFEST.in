@@ -1,0 +1,3 @@
+include .env.example
+include Makefile
+recursive-include tests *.py

@@ -5,6 +5,7 @@ All tests mock the WebSocket connection so no running VTS instance is needed.
 FakeWS records sent messages and returns preset responses, letting us verify
 the full protocol without external dependencies.
 """
+
 import asyncio
 import json
 import sys
@@ -39,7 +40,7 @@ class FakeWS:
     async def recv(self) -> str:
         r = self._responses[self._idx]
         self._idx += 1
-        return json.dumps(r)
+        return json.dumps({**r, "requestID": r.get("requestID", self.sent[-1]["requestID"])})
 
     async def close(self) -> None:
         pass
@@ -70,6 +71,7 @@ def _make_client(ws: FakeWS, token_path: Path, **env) -> VTubeClient:
 
 
 # ── connection & auth tests ───────────────────────────────────────────────────
+
 
 def test_connect_with_cached_token_sends_only_auth_request(tmp_path):
     tp = tmp_path / "token.txt"
@@ -104,9 +106,9 @@ def test_connect_stale_token_deletes_and_reauths(tmp_path):
 
     assert c.active
     assert ws.sent_types() == [
-        "AuthenticationRequest",       # stale attempt
+        "AuthenticationRequest",  # stale attempt
         "AuthenticationTokenRequest",  # request new
-        "AuthenticationRequest",       # fresh attempt
+        "AuthenticationRequest",  # fresh attempt
     ]
     assert not tp.exists() or tp.read_text() == "tok_abc123"
 
@@ -123,9 +125,7 @@ def test_connect_denied_token_sets_inactive(tmp_path):
 def test_connect_vts_unavailable_sets_inactive():
     async def go():
         with patch("utils.vtube.websockets") as mock_ws:
-            mock_ws.connect = AsyncMock(
-                side_effect=ConnectionRefusedError("no VTS")
-            )
+            mock_ws.connect = AsyncMock(side_effect=ConnectionRefusedError("no VTS"))
             c = VTubeClient()
             await c.connect()
             return c
@@ -135,6 +135,7 @@ def test_connect_vts_unavailable_sets_inactive():
 
 
 # ── message format tests ──────────────────────────────────────────────────────
+
 
 def test_all_messages_have_required_vts_envelope(tmp_path):
     tp = tmp_path / "token.txt"
@@ -277,3 +278,54 @@ def test_token_written_only_on_success(tmp_path):
 
     _run(go())
     assert not tp.exists(), "token file must not be written on denied auth"
+
+
+def test_rejected_replacement_token_does_not_mark_connected(tmp_path):
+    tp = tmp_path / "token.txt"
+    tp.write_text("stale")
+    ws = FakeWS(AUTH_FAIL, TOKEN_RESP, AUTH_FAIL)
+    ws.close = AsyncMock()
+    c = _make_client(ws, tp)
+    assert not c.active
+    assert c._ws is None
+    ws.close.assert_awaited_once()
+    assert tp.read_text() == "stale"  # Never cache an unverified token.
+
+
+def test_api_error_disables_avatar(tmp_path):
+    tp = tmp_path / "token.txt"
+    tp.write_text("tok")
+    ws = FakeWS(AUTH_OK, {"messageType": "APIError", "data": {"errorID": 1}})
+    c = _make_client(ws, tp)
+    _run(c.set_mouth(0.5))
+    assert not c.active
+
+
+def test_unrelated_event_is_skipped(tmp_path):
+    tp = tmp_path / "token.txt"
+    tp.write_text("tok")
+    ws = FakeWS({"requestID": "unrelated", "messageType": "SomeEvent"}, AUTH_OK)
+    c = _make_client(ws, tp)
+    assert c.active
+
+
+def test_request_timeout_closes_connection(tmp_path):
+    tp = tmp_path / "token.txt"
+    tp.write_text("tok")
+    ws = FakeWS(AUTH_OK)
+    c = _make_client(ws, tp)
+    c.timeout = 0.01
+
+    async def never():
+        await asyncio.Event().wait()
+
+    ws.recv = never
+    _run(c.set_mouth(0.5))
+    assert not c.active
+
+
+def test_disabled_avatar_does_not_connect(monkeypatch):
+    monkeypatch.setenv("VTS_ENABLED", "0")
+    with patch("utils.vtube.websockets.connect", new_callable=AsyncMock) as connect:
+        _run(VTubeClient().connect())
+        connect.assert_not_awaited()
