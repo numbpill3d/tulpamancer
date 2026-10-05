@@ -1,6 +1,8 @@
+import os
+
 import pytest
 
-from utils.config import LLMSettings, RuntimeSettings, env_bool
+from utils.config import LLMSettings, RuntimeSettings, bypass_proxy_for_loopback, env_bool
 
 
 @pytest.mark.parametrize("value", ["FALSE", "0", "No", "off"])
@@ -48,3 +50,23 @@ def test_placeholder_key_is_rejected(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "your_key_here")
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
         LLMSettings.from_env()
+
+
+def test_loopback_proxy_bypass_preserves_existing_entries(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "internal.example")
+    monkeypatch.delenv("no_proxy", raising=False)
+
+    bypass_proxy_for_loopback("127.0.0.1")
+
+    assert os.environ["NO_PROXY"] == "internal.example,127.0.0.1"
+    assert os.environ["no_proxy"] == os.environ["NO_PROXY"]
+
+
+def test_remote_host_does_not_change_proxy_bypass(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "internal.example")
+    monkeypatch.delenv("no_proxy", raising=False)
+
+    bypass_proxy_for_loopback("api.example.com")
+
+    assert os.environ["NO_PROXY"] == "internal.example"
+    assert "no_proxy" not in os.environ

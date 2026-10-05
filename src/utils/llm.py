@@ -48,7 +48,9 @@ def _clean(text: str) -> str:
 
 class LLMClient:
     def __init__(self):
-        from utils.config import LLMSettings
+        from urllib.parse import urlsplit
+
+        from utils.config import LLMSettings, bypass_proxy_for_loopback
 
         settings = LLMSettings.from_env()
         self.timeout = settings.timeout
@@ -73,6 +75,7 @@ class LLMClient:
         else:
             import openai
 
+            bypass_proxy_for_loopback(urlsplit(settings.base_url).hostname)
             self._openai_client = openai.AsyncOpenAI(
                 base_url=settings.base_url,
                 api_key=settings.api_key,

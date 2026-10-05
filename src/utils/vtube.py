@@ -6,7 +6,7 @@ from pathlib import Path
 
 import websockets
 
-from utils.config import env_bool, env_number
+from utils.config import bypass_proxy_for_loopback, env_bool, env_number
 
 TOKEN_PATH = Path.home() / ".config" / "tulpamancer" / "vts_token.txt"
 
@@ -23,6 +23,7 @@ class VTubeClient:
         self.timeout = env_number("VTS_TIMEOUT", 2.0, 0.1)
         self.auth_timeout = env_number("VTS_AUTH_TIMEOUT", 30.0, 0.1)
         self._uri = f"ws://{self.host}:{self.port}"
+        bypass_proxy_for_loopback(self.host)
         self._ws = None
         self._lock = asyncio.Lock()
         self.active = False

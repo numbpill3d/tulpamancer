@@ -4,6 +4,7 @@ import math
 import os
 import tempfile
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -25,6 +26,27 @@ def env_number(name: str, default, minimum, maximum=None):
         upper = f" and <= {maximum}" if maximum is not None else ""
         raise ValueError(f"{name} must be >= {minimum}{upper}")
     return value
+
+
+def bypass_proxy_for_loopback(host: str | None) -> None:
+    """Keep local Ollama and VTube Studio traffic off configured proxies."""
+    if not host:
+        return
+    try:
+        is_loopback = ip_address(host).is_loopback
+    except ValueError:
+        is_loopback = host.rstrip(".").lower() == "localhost"
+    if not is_loopback:
+        return
+
+    entries = []
+    for name in ("NO_PROXY", "no_proxy"):
+        entries.extend(item.strip() for item in os.getenv(name, "").split(",") if item.strip())
+    if host not in entries:
+        entries.append(host)
+    value = ",".join(dict.fromkeys(entries))
+    os.environ["NO_PROXY"] = value
+    os.environ["no_proxy"] = value
 
 
 @dataclass(frozen=True)
