@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Tulpa Companion
+Comment=Chat with the Tulpamancer avatar
+Exec=/home/scorn/Projects/tulpamancer/.venv/bin/python /home/scorn/Projects/tulpamancer/src/tulpa_window.py
+Icon=utilities-terminal
+Terminal=false
+Categories=Utility;Network;

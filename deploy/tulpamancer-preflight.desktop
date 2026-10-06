@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Tulpamancer Preflight
+Comment=Check the local AI VTuber stack without starting a stream
+Exec=konsole --hold -e /home/scorn/Projects/tulpamancer/.venv/bin/python /home/scorn/Projects/tulpamancer/src/main.py --preflight
+Icon=utilities-terminal
+Terminal=false
+Categories=Utility;

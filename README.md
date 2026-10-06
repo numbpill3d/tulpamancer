@@ -73,7 +73,7 @@ Ctrl+C stops playback and pending requests, closes the avatar mouth, clears subt
 
 VTube Studio is a Live2D host; this project does **not** implement a VRM/3D avatar host. the old README's claim of VRM support was incorrect.
 
-set `VTS_TALKING_HOTKEY` and `VTS_IDLE_HOTKEY` to existing VTube Studio hotkey IDs if you want extra animations. the token is cached at `~/.config/tulpamancer/vts_token.txt` only after successful authentication. a rejected cached token triggers a replacement request. failed connections or API errors disable the avatar and allow audio to continue; connection is retried at subsequent utterances.
+set `VTS_TALKING_HOTKEY` and `VTS_IDLE_HOTKEY` to existing VTube Studio hotkey IDs if you want extra animations. `VTS_EMOTION_HOTKEYS` accepts comma-separated mappings such as `excited=HotkeyID,happy=OtherID`; the speech text gets a small deterministic emotion classification before playback. the token is cached at `~/.config/tulpamancer/vts_token.txt` only after successful authentication. a rejected cached token triggers a replacement request. failed connections or API errors disable the avatar and allow audio to continue; connection is retried at subsequent utterances.
 
 `VTS_ENABLED=0` skips avatar connections entirely. `LIPSYNC_ENABLED=0` skips amplitude extraction and removes the ffmpeg requirement. lip sync is RMS amplitude based, with an approximate 150 ms playback startup offset; it is not phoneme/viseme synthesis.
 
@@ -85,9 +85,15 @@ subtitles are written atomically in UTF-8 and cleared between utterances and dur
 
 capture mpv's output using OBS desktop/application audio, and capture VTube Studio separately. tulpamancer does not launch OBS or start broadcasting.
 
+With OBS 28+ and WebSocket enabled, `python src/main.py --setup-obs` creates the `Tulpamancer` scene and configures the subtitle text source automatically. Set the OBS WebSocket password and optional scene/source names in `.env`; for local OBS, the app can reuse OBS's locally stored generated password. The default WebSocket port is `4455`. On Linux, set `OBS_AUDIO_SOURCE_KIND=pulse_output_capture`, `OBS_AUDIO_SOURCE_NAME`, and optionally `OBS_AUDIO_SOURCE_DEVICE` to capture the playback monitor; device names differ between machines.
+
+Repeated `--setup-obs` runs also preserve a dark/red composition: configurable color backdrop and accent, avatar capture above the backdrop, subtitles above the avatar, and a white color-key filter on `OBS_AVATAR_SOURCE_NAME`. The avatar capture must already exist in OBS; on Wayland, add it with PipeWire Screen Capture and select the VTube Studio window.
+
 ## Twitch
 
-set `TWITCH_CHANNEL=yourchannel`. the reader joins anonymously and never sends chat messages. it handles IRC batches, heartbeats, and reconnect requests, keeps the most recent ten messages, and passes one queued message into each upcoming utterance. a prefetched line can delay reactions by one utterance. messages are viewer context, not a privileged command interface.
+set `TWITCH_CHANNEL=yourchannel`. without credentials, the reader joins anonymously and never sends chat messages. to enable output, set `TWITCH_BOT_USERNAME`, `TWITCH_OAUTH_TOKEN`, and `TWITCH_SEND_ENABLED=1` for a bot token with `chat:edit`. Generated lines are rate-limited by `TWITCH_SEND_INTERVAL` (five seconds by default). It handles IRC batches, heartbeats, and reconnect requests, keeps the most recent ten messages, and passes one queued message into each upcoming utterance. a prefetched line can delay reactions by one utterance. messages are viewer context, not a privileged command interface.
+
+Incoming chat is also bounded by `TWITCH_MAX_MESSAGES_PER_MINUTE`, ignores slash/ bang commands by default, and supports optional ignored users and blocked terms. These are guardrails, not a replacement for a human moderator.
 
 ## character
 
@@ -104,7 +110,7 @@ all values are documented in `.env.example`. optional values use the defaults be
 | `LLM_API_KEY` | required for compatible providers except Ollama |
 | `LLM_BASE_URL` | known provider endpoint; required for a custom provider |
 | `LLM_MODEL` | Anthropic: `claude-haiku-4-5-20251001`; Ollama: `llama3.2`; Groq: `llama-3.1-8b-instant`; others require a model |
-| `LLM_MAX_TOKENS` | `150` output tokens (not words) |
+| `LLM_MAX_TOKENS` | `220` output tokens (not words) |
 | `LLM_MAX_HISTORY` | `20` complete conversation exchanges, minimum 1 |
 | `LLM_TIMEOUT` | `60` seconds per provider request |
 | `CHARACTER_NAME` | `Tulpa` |
@@ -150,3 +156,27 @@ python -m pytest -q
 tests require ffmpeg but no API keys, network services, VTube Studio, Twitch account, or audio device. fixtures generate local audio; regressions cover the pipeline, retries, cancellation, subprocess cleanup, configuration, TTS files, LLM history, IRC framing, and VTube Studio authentication/protocol behavior. CI runs the suite on Python 3.11–3.13.
 
 external service availability and your actual audio/avatar setup require a real `--utterances 1` check. automated mocks cannot certify a live stream.
+
+## desktop companion
+
+Launch the dependency-free lower-left chat window with:
+
+```bash
+.venv/bin/python src/tulpa_window.py
+```
+
+Type a message and press Enter or Send. Each message uses the same authenticated VTube Studio, LLM, Edge TTS, mpv, and OBS subtitle pipeline.
+
+The `MIC` button is push-to-talk. Press it to record from the default PipeWire microphone, press `STOP`, and the local Whisper model transcribes the clip and sends it through the same pipeline. The first use downloads the configured `WHISPER_MODEL` (default `tiny.en`); keep the companion supervised while using voice input.
+
+The companion control bar shows OBS status and provides explicit Start/Stop controls. `E-STOP` terminates the current speech process and requests an OBS stop, so a human can cut the avatar off quickly.
+
+The `Tulpamancer Speech Session` desktop launcher starts the continuous speech loop in a visible terminal while leaving OBS stopped. Run `--preflight` first; it checks the LLM endpoint, VTube Studio auth, OBS scene, and whether OBS has a configured stream service without displaying any stream key.
+
+Idle motion uses configurable VTube Studio tracking inputs rather than requiring a model-specific hotkey: `VTS_IDLE_PARAMETERS=FaceAngleX=2,FaceAngleZ=1` produces subtle head sway that can flow into model physics when Tulpa is not speaking. Parameter IDs are model-dependent; `VTS_FIDGET_HOTKEYS` can add occasional model-specific fidgets. Reactions use `VTS_EMOTION_HOTKEYS`; inspect the model's available hotkeys in VTube Studio before assigning IDs.
+
+Named animation profiles are supported through `VTS_EMOTE_HOTKEYS` (`wave=...`, `laugh=...`, `surprised=...`, etc.). Set `VTS_AUTO_EMOTES=1` to discover model hotkeys by name and automatically map names containing `mad`, `sad`, `laugh`, or `surprise` to the matching reaction. To add more body animations, create VTube Studio hotkeys named `wave`, `shrug`, `dance`, `laugh`, or similar; the plugin can then trigger those IDs without hard-coding them.
+
+## local deployment
+
+For a supervised desktop-session deployment, see [`deploy/README.md`](deploy/README.md) and [`deploy/tulpamancer.service`](deploy/tulpamancer.service). The service keeps OBS and VTube Studio under your control, restarts recoverable runtime failures, and writes logs to the user journal.

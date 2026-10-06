@@ -1,0 +1,22 @@
+[Unit]
+Description=Tulpamancer AI VTuber
+After=graphical-session.target pipewire.service
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/tulpamancer
+EnvironmentFile=%h/Projects/tulpamancer/.env
+ExecStart=%h/Projects/tulpamancer/.venv/bin/python %h/Projects/tulpamancer/src/main.py
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=20
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+
+# A configuration error or Ctrl+C-style exit should not be restarted forever.
+RestartPreventExitStatus=2 130
+
+[Install]
+WantedBy=default.target

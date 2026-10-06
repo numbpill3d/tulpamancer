@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Tulpamancer Speech Session
+Comment=Run the supervised AI VTuber speech loop; OBS remains stopped
+Exec=konsole --hold -e /home/scorn/Projects/tulpamancer/.venv/bin/python /home/scorn/Projects/tulpamancer/src/main.py
+Icon=utilities-terminal
+Terminal=false
+Categories=Utility;

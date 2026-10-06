@@ -3,12 +3,14 @@
 import argparse
 import asyncio
 import contextlib
+import inspect
 import os
 import shutil
 import signal
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -16,6 +18,8 @@ from utils.chat import ChatClient
 from utils.config import LLMSettings, RuntimeSettings, env_number
 from utils.lipsync import drive, extract_amplitudes_async
 from utils.llm import LLMClient
+from utils.emotion import detect_emote
+from utils.obs import OBSClient, obs_stream_action, setup_obs
 from utils.tts import TTSClient
 from utils.vtube import VTubeClient
 
@@ -94,6 +98,11 @@ async def prepare_with_retry(llm, tts, path, settings, context=None):
 
 async def speak_utterance(path, frames, vtube, fps):
     # The audio process owns the duration. Never leave a lip-sync task behind.
+    set_speaking = getattr(vtube, "set_speaking", None)
+    if set_speaking is not None:
+        result = set_speaking(True)
+        if inspect.isawaitable(result):
+            await result
     await vtube.trigger_talking()
     mouth = asyncio.create_task(drive(frames, vtube, fps))
     try:
@@ -103,14 +112,21 @@ async def speak_utterance(path, frames, vtube, fps):
         await asyncio.gather(mouth, return_exceptions=True)
         await vtube.set_mouth(0.0)
         await vtube.trigger_idle()
+        if set_speaking is not None:
+            result = set_speaking(False)
+            if inspect.isawaitable(result):
+                await result
 
 
-async def run_pipeline(settings, llm, tts, vtube, chat, utterances=0):
+async def run_pipeline(settings, llm, tts, vtube, chat, utterances=0, first_context=None):
     """Run until interrupted (0) or after exactly N completed utterances."""
     next_task = None
     try:
         _write_subtitle(settings.subtitle_path, "")
         await vtube.connect()
+        start_idle = getattr(vtube, "start_idle_motion", None)
+        if start_idle is not None:
+            start_idle()
         chat.start()
         print(f"[tulpamancer] {settings.name} is live — ctrl+c to stop\n")
         # Per-run audio slots avoid races between separate app instances.
@@ -118,7 +134,13 @@ async def run_pipeline(settings, llm, tts, vtube, chat, utterances=0):
             slots = [Path(directory) / f"{i}.mp3" for i in range(2)]
             slot, completed = 0, 0
             next_task = asyncio.create_task(
-                prepare_with_retry(llm, tts, slots[slot], settings, chat.pop())
+                prepare_with_retry(
+                    llm,
+                    tts,
+                    slots[slot],
+                    settings,
+                    first_context if first_context is not None else chat.pop(),
+                )
             )
             try:
                 while not utterances or completed < utterances:
@@ -131,8 +153,18 @@ async def run_pipeline(settings, llm, tts, vtube, chat, utterances=0):
                     if not vtube.active:
                         await vtube.connect()
                     print(f"[{settings.name}] {text}\n")
+                    send_chat = getattr(chat, "send_message", None)
+                    if send_chat is not None:
+                        result = send_chat(text)
+                        if inspect.isawaitable(result):
+                            await result
                     _write_subtitle(settings.subtitle_path, text)
                     try:
+                        emotion = getattr(vtube, "trigger_emotion", None)
+                        if emotion is not None:
+                            result = emotion(detect_emote(text))
+                            if inspect.isawaitable(result):
+                                await result
                         await speak_utterance(slots[slot], frames, vtube, settings.fps)
                     finally:
                         _write_subtitle(settings.subtitle_path, "")
@@ -171,7 +203,7 @@ def check_configuration(settings) -> list[str]:
     return errors
 
 
-async def main(settings=None, utterances=0):
+async def main(settings=None, utterances=0, first_context=None):
     settings = settings or RuntimeSettings.from_env()
     # SIGTERM from a service manager gets the same cleanup as Ctrl+C.
     loop = asyncio.get_running_loop()
@@ -184,11 +216,74 @@ async def main(settings=None, utterances=0):
         pass
     try:
         await run_pipeline(
-            settings, LLMClient(), TTSClient(), VTubeClient(), ChatClient(), utterances
+            settings,
+            LLMClient(),
+            TTSClient(),
+            VTubeClient(),
+            ChatClient(),
+            utterances,
+            first_context,
         )
     finally:
         if installed:
             loop.remove_signal_handler(signal.SIGTERM)
+
+
+async def preflight(settings) -> int:
+    """Probe local services without generating speech or starting a stream."""
+    failures = 0
+    llm = LLMSettings.from_env()
+    parsed = urlsplit(llm.base_url or "")
+    if llm.provider == "ollama" and parsed.hostname and parsed.port:
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(parsed.hostname, parsed.port), timeout=2
+            )
+            writer.close()
+            await writer.wait_closed()
+            print(f"[preflight] LLM {llm.provider} reachable at {parsed.hostname}:{parsed.port}")
+        except Exception:
+            failures += 1
+            print(f"[preflight] FAIL LLM {llm.provider} at {parsed.hostname}:{parsed.port}")
+    else:
+        print(f"[preflight] LLM provider configured: {llm.provider}")
+
+    vtube = VTubeClient()
+    if vtube.enabled:
+        await vtube.connect()
+        if vtube.active:
+            print("[preflight] VTube Studio authenticated")
+        else:
+            failures += 1
+            print("[preflight] FAIL VTube Studio is unavailable")
+        await vtube.disconnect()
+    else:
+        print("[preflight] VTube Studio disabled")
+
+    obs = OBSClient()
+    try:
+        await obs.connect()
+        status = await obs.stream_status()
+        service = await obs.stream_service()
+        print(
+            f"[preflight] OBS reachable; streaming={status.get('outputActive', False)} "
+            f"scene={obs.scene}"
+        )
+        if service["configured"]:
+            print(f"[preflight] OBS stream service configured: {service['type']}")
+        else:
+            failures += 1
+            print("[preflight] FAIL OBS stream service is not configured")
+    except Exception:
+        failures += 1
+        print("[preflight] FAIL OBS WebSocket is unavailable")
+    finally:
+        await obs.close()
+
+    print(
+        "[preflight] READY" if not failures else f"[preflight] BLOCKED ({failures} check(s) failed)"
+    )
+    return 0 if not failures else 1
 
 
 def cli(argv=None) -> int:
@@ -200,11 +295,26 @@ def cli(argv=None) -> int:
         "--check", action="store_true", help="Check local configuration without making API calls"
     )
     parser.add_argument(
+        "--preflight", action="store_true", help="Probe local LLM, avatar, and OBS without speaking"
+    )
+    parser.add_argument(
+        "--setup-obs", action="store_true", help="Create/update the Tulpamancer scene in OBS"
+    )
+    parser.add_argument(
+        "--obs-status", action="store_true", help="Show whether OBS is currently streaming"
+    )
+    parser.add_argument("--start-stream", action="store_true", help="Start the OBS stream")
+    parser.add_argument("--stop-stream", action="store_true", help="Stop the OBS stream")
+    parser.add_argument("--message", help="Give Tulpa a message to answer on the first utterance")
+    parser.add_argument(
         "--utterances", type=int, default=0, metavar="N", help="Stop after N lines (0 = continuous)"
     )
     args = parser.parse_args(argv)
     if args.utterances < 0:
         parser.error("--utterances must be >= 0")
+    obs_actions = sum((args.obs_status, args.start_stream, args.stop_stream))
+    if args.setup_obs and obs_actions or obs_actions > 1:
+        parser.error("choose one OBS action")
     load_dotenv(args.env_file)
     try:
         settings = RuntimeSettings.from_env()
@@ -218,7 +328,16 @@ def cli(argv=None) -> int:
                 "[check] Local configuration and executables OK. No service connections were attempted."
             )
             return 0
-        asyncio.run(main(settings, args.utterances))
+        if args.preflight:
+            return asyncio.run(preflight(settings))
+        if args.setup_obs:
+            asyncio.run(setup_obs())
+            return 0
+        if args.obs_status or args.start_stream or args.stop_stream:
+            action = "status" if args.obs_status else "start" if args.start_stream else "stop"
+            asyncio.run(obs_stream_action(action))
+            return 0
+        asyncio.run(main(settings, args.utterances, args.message))
         return 0
     except (KeyboardInterrupt, asyncio.CancelledError):
         return 130

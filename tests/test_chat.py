@@ -81,3 +81,14 @@ def test_reconnect_message_requests_new_connection():
 
     with pytest.raises(ConnectionError):
         asyncio.run(ChatClient()._handle_frame(":tmi.twitch.tv RECONNECT", AsyncMock()))
+
+
+def test_chat_guardrails_ignore_commands_and_blocked_terms(monkeypatch):
+    from utils.chat import ChatClient
+
+    monkeypatch.setenv("TWITCH_BLOCKED_TERMS", "spoiler")
+    client = ChatClient()
+    assert not client._accept_message("alice", "!command")
+    assert not client._accept_message("alice", "this contains a spoiler")
+    assert client._accept_message("alice", "hello Tulpa")
+    assert client.pop() is None

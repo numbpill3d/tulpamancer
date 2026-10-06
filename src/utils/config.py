@@ -58,6 +58,7 @@ class LLMSettings:
     timeout: float
     max_tokens: int
     max_history: int
+    temperature: float
 
     @classmethod
     def from_env(cls):
@@ -92,8 +93,9 @@ class LLMSettings:
             base,
             key,
             env_number("LLM_TIMEOUT", 60.0, 0.1),
-            env_number("LLM_MAX_TOKENS", 150, 1),
+            env_number("LLM_MAX_TOKENS", 220, 1),
             env_number("LLM_MAX_HISTORY", 20, 1),
+            env_number("LLM_TEMPERATURE", 0.75, 0, 2),
         )
 
 
