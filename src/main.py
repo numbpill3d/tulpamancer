@@ -158,13 +158,16 @@ async def run_pipeline(settings, llm, tts, vtube, chat, utterances=0, first_cont
                             {next_task, message_waiter},
                             return_when=asyncio.FIRST_COMPLETED,
                         )
-                        if message_waiter in done and next_task not in done:
-                            next_task.cancel()
-                            await asyncio.gather(next_task, return_exceptions=True)
-                            next_task = asyncio.create_task(
-                                prepare_with_retry(llm, tts, next_path, settings, chat.pop())
-                            )
-                            continue
+                        if message_waiter in done:
+                            context = chat.pop()
+                            if context is not None:
+                                if next_task not in done:
+                                    next_task.cancel()
+                                    await asyncio.gather(next_task, return_exceptions=True)
+                                next_task = asyncio.create_task(
+                                    prepare_with_retry(llm, tts, next_path, settings, context)
+                                )
+                                continue
                         if message_waiter not in done:
                             message_waiter.cancel()
                             await asyncio.gather(message_waiter, return_exceptions=True)

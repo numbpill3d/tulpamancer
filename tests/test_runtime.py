@@ -145,6 +145,49 @@ def test_cancellation_stops_prefetch_and_clears_subtitles(tmp_path, monkeypatch)
     llm.close.assert_awaited_once()
 
 
+def test_chat_supersedes_completed_idle_prefetch(tmp_path, monkeypatch):
+    settings, llm, tts, vtube, _ = clients(tmp_path)
+
+    class Chat:
+        def __init__(self):
+            self.event = asyncio.Event()
+            self.queued = False
+            self.contexts = []
+
+        def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+        def pop(self):
+            if self.queued:
+                self.queued = False
+                context = "[chat: viewer: answer me]"
+                self.contexts.append(context)
+                return context
+            return None
+
+        async def wait_for_message(self):
+            await self.event.wait()
+            self.event.clear()
+
+    chat = Chat()
+    played = []
+
+    async def play(path):
+        played.append(path.read_text())
+        if len(played) == 1:
+            chat.queued = True
+            chat.event.set()
+
+    monkeypatch.setattr(main, "play_audio", play)
+    asyncio.run(main.run_pipeline(settings, llm, tts, vtube, chat, utterances=2))
+
+    assert played == ["line 1", "line 3"]
+    assert chat.contexts == ["[chat: viewer: answer me]"]
+
+
 def test_playback_failure_cleans_everything(tmp_path, monkeypatch):
     settings, llm, tts, vtube, chat = clients(tmp_path)
     monkeypatch.setattr(main, "play_audio", AsyncMock(side_effect=RuntimeError("mpv failed")))
