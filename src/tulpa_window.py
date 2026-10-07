@@ -9,10 +9,13 @@ import tkinter as tk
 from tkinter import messagebox
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from utils.voice import VoiceInput
 
 
 ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
 BLACK = "#050507"
 PANEL = "#0b0b0f"
 RED = "#d51f3f"
@@ -234,6 +237,8 @@ class TulpaWindow:
             "--utterances",
             "1",
         ]
+        self.events.put(("status", "Tulpa is thinking…\n"))
+        saw_response = False
         try:
             self.process = subprocess.Popen(
                 command,
@@ -247,10 +252,17 @@ class TulpaWindow:
             assert self.process.stdout is not None
             for line in self.process.stdout:
                 if line.startswith("[Tulpa]"):
+                    saw_response = True
                     self.events.put(("tulpa", line))
-                elif line.startswith("[error]") or "unavailable" in line:
+                elif (
+                    line.startswith(("[error]", "[speech]", "[config]"))
+                    or "unavailable" in line
+                    or "failed" in line
+                ):
                     self.events.put(("status", line))
             self.process.wait()
+            if self.process.returncode and not saw_response:
+                self.events.put(("status", f"Tulpa stopped (exit {self.process.returncode}).\n"))
         except Exception as exc:
             self.events.put(("status", f"[window] {type(exc).__name__}\n"))
         finally:

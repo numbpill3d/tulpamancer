@@ -177,6 +177,8 @@ Idle motion uses configurable VTube Studio tracking inputs rather than requiring
 
 Named animation profiles are supported through `VTS_EMOTE_HOTKEYS` (`wave=...`, `laugh=...`, `surprised=...`, etc.). Set `VTS_AUTO_EMOTES=1` to discover model hotkeys by name and automatically map names containing `mad`, `sad`, `laugh`, or `surprise` to the matching reaction. To add more body animations, create VTube Studio hotkeys named `wave`, `shrug`, `dance`, `laugh`, or similar; the plugin can then trigger those IDs without hard-coding them.
 
+`VTS_AUTO_FIDGETS=1` lets the plugin use discovered non-`RESET` model hotkeys as occasional idle facial fidgets and as a fallback reaction when a named profile is unavailable. This cannot create body motion that the Live2D model does not expose: body gestures require corresponding VTube Studio hotkeys on the model.
+
 ## local deployment
 
 For a supervised desktop-session deployment, see [`deploy/README.md`](deploy/README.md) and [`deploy/tulpamancer.service`](deploy/tulpamancer.service). The service keeps OBS and VTube Studio under your control, restarts recoverable runtime failures, and writes logs to the user journal.

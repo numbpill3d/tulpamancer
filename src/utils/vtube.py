@@ -46,6 +46,7 @@ class VTubeClient:
         self.emotion_hotkeys = _emotion_hotkeys(os.getenv("VTS_EMOTION_HOTKEYS", ""))
         self.emote_hotkeys = _emotion_hotkeys(os.getenv("VTS_EMOTE_HOTKEYS", ""))
         self.auto_emotes = env_bool("VTS_AUTO_EMOTES", False)
+        self.auto_fidgets = env_bool("VTS_AUTO_FIDGETS", False)
         self.fidget_hotkeys = tuple(
             item.strip() for item in os.getenv("VTS_FIDGET_HOTKEYS", "").split(",") if item.strip()
         )
@@ -63,6 +64,7 @@ class VTubeClient:
         self._idle_task: asyncio.Task | None = None
         self._speaking = False
         self._auto_emote_hotkeys: dict[str, list[str]] = {}
+        self._auto_fidget_hotkeys: list[str] = []
         self.active = False
 
     async def connect(self) -> None:
@@ -160,6 +162,8 @@ class VTubeClient:
             name = hotkey.get("name", "").lower()
             if not hotkey_id or not name:
                 continue
+            if name != "reset":
+                self._auto_fidget_hotkeys.append(hotkey_id)
             labels = {name}
             if any(word in name for word in ("mad", "angry", "rage")):
                 labels.add("angry")
@@ -199,13 +203,17 @@ class VTubeClient:
         if not hotkey:
             choices = self._auto_emote_hotkeys.get(label, [])
             hotkey = random.choice(choices) if choices else ""
+        if not hotkey and self.auto_fidgets and self._auto_fidget_hotkeys:
+            hotkey = random.choice(self._auto_fidget_hotkeys)
         await self.trigger_hotkey(hotkey)
 
     async def set_speaking(self, speaking: bool) -> None:
         self._speaking = speaking
 
     def start_idle_motion(self) -> None:
-        if (self.fidget_hotkeys or self.idle_parameters) and self._idle_task is None:
+        if (
+            self.fidget_hotkeys or self.idle_parameters or (self.auto_fidgets and self.auto_emotes)
+        ) and self._idle_task is None:
             self._idle_task = asyncio.create_task(self._idle_motion_loop())
 
     async def _idle_motion_loop(self) -> None:
@@ -227,8 +235,12 @@ class VTubeClient:
                     await asyncio.sleep(0.35)
                     continue
                 await asyncio.sleep(random.uniform(self.fidget_min, self.fidget_max))
-                if self.fidget_hotkeys and self.active and not self._speaking:
-                    await self.trigger_hotkey(random.choice(self.fidget_hotkeys))
+                if self.active and not self._speaking:
+                    choices = self.fidget_hotkeys or (
+                        self._auto_fidget_hotkeys if self.auto_fidgets else []
+                    )
+                    if choices:
+                        await self.trigger_hotkey(random.choice(choices))
         except asyncio.CancelledError:
             raise
 
