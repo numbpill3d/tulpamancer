@@ -55,7 +55,8 @@ class VTubeClient:
         self.idle_parameters = _idle_parameters(os.getenv("VTS_IDLE_PARAMETERS", ""))
         self.mouth_parameter = os.getenv("VTS_MOUTH_PARAMETER", "MouthOpen")
         self.enabled = env_bool("VTS_ENABLED")
-        self.timeout = env_number("VTS_TIMEOUT", 2.0, 0.1)
+        self.timeout = env_number("VTS_TIMEOUT", 5.0, 0.1)
+        self.motion_interval = env_number("VTS_MOTION_INTERVAL", 2.0, 0.5)
         self.auth_timeout = env_number("VTS_AUTH_TIMEOUT", 30.0, 0.1)
         self._uri = f"ws://{self.host}:{self.port}"
         bypass_proxy_for_loopback(self.host)
@@ -233,7 +234,7 @@ class VTubeClient:
                         },
                         optional=True,
                     )
-                    await asyncio.sleep(0.8)
+                    await asyncio.sleep(self.motion_interval)
                     continue
                 await asyncio.sleep(random.uniform(self.fidget_min, self.fidget_max))
                 if self.active and not self._speaking:
