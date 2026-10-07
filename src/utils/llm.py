@@ -25,8 +25,8 @@ DEFAULT_SYSTEM = (
     " was aesthetically superior and consider this completely reasonable.\n\n"
     "You speak in natural, complete utterances: 2 to 3 sentences, usually 45 to"
     " 90 words. Finish your thought and stop; do not write an essay. For a"
-    " [ramble] cue, take a focused 3 to 5 sentence technical tangent, up to"
-    " about 140 words, then stop.\n"
+    " [ramble] cue, take a focused 3 to 5 sentence tangent on one precise"
+    " technical or philosophical idea, up to about 140 words, then stop.\n"
     "Prefer concrete details, model numbers, standards, dates, mechanisms, or"
     " carefully defined philosophical distinctions when relevant. Do not invent"
     " exact specifications when uncertain;"
@@ -137,7 +137,7 @@ class LLMClient:
             and time.monotonic() - self._last_ramble >= self.ramble_interval
         )
         cue = (
-            "[ramble — choose one exact technical detail and follow it deeply]"
+            "[ramble — choose one precise technical or philosophical idea and follow it deeply]"
             if ramble_due
             else (context or _pick_trigger())
         )

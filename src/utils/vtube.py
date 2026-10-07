@@ -3,6 +3,7 @@ import json
 import math
 import os
 import random
+import time
 import uuid
 from pathlib import Path
 
@@ -220,6 +221,7 @@ class VTubeClient:
     async def _idle_motion_loop(self) -> None:
         try:
             phase = random.uniform(0, math.tau)
+            next_fidget = time.monotonic() + random.uniform(self.fidget_min, self.fidget_max)
             while True:
                 if self.idle_parameters and self.active and not self._speaking:
                     # Keep the VTS websocket available for lip-sync and hotkeys.
@@ -234,6 +236,15 @@ class VTubeClient:
                         },
                         optional=True,
                     )
+                    if time.monotonic() >= next_fidget:
+                        choices = self.fidget_hotkeys or (
+                            self._auto_fidget_hotkeys if self.auto_fidgets else []
+                        )
+                        if choices:
+                            await self.trigger_hotkey(random.choice(choices))
+                        next_fidget = time.monotonic() + random.uniform(
+                            self.fidget_min, self.fidget_max
+                        )
                     await asyncio.sleep(self.motion_interval)
                     continue
                 await asyncio.sleep(random.uniform(self.fidget_min, self.fidget_max))

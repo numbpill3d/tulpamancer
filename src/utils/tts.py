@@ -14,8 +14,8 @@ class TTSClient:
         self.voice = os.getenv("TTS_VOICE", "en-US-GuyNeural").strip()
         if not self.voice:
             raise ValueError("TTS_VOICE must not be empty")
-        self.pitch = os.getenv("TTS_PITCH", "+0Hz")
-        self.rate = os.getenv("TTS_RATE", "-5%")
+        self.pitch = os.getenv("TTS_PITCH", "-18Hz")
+        self.rate = os.getenv("TTS_RATE", "-8%")
         self.volume = os.getenv("TTS_VOLUME", "+0%")
         self.retries = env_number("TTS_RETRIES", 2, 1, 4)
         for name, value, unit in (

@@ -219,6 +219,27 @@ def test_set_mouth_correct_format(tmp_path):
     assert params[0]["value"] == 0.75
 
 
+def test_idle_motion_can_fidget_while_head_sway_is_enabled():
+    async def go():
+        c = VTubeClient()
+        c.active = True
+        c.idle_parameters = {"FaceAngleX": 1.0}
+        c.motion_interval = 0.001
+        c.fidget_min = c.fidget_max = 0
+        c.auto_fidgets = True
+        c.auto_emotes = True
+        c._auto_fidget_hotkeys = ["fidget_hk"]
+        c.set_parameters = AsyncMock()
+        c.trigger_hotkey = AsyncMock()
+        c.start_idle_motion()
+        await asyncio.sleep(0.01)
+        await c.stop_idle_motion()
+        return c
+
+    c = _run(go())
+    c.trigger_hotkey.assert_awaited()
+
+
 def test_set_mouth_value_rounded_to_3dp(tmp_path):
     tp = tmp_path / "token.txt"
     tp.write_text("tok")
