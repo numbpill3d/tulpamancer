@@ -56,7 +56,10 @@ class ChatClient:
         return bool(self.channel)
 
     def pop(self) -> str | None:
-        return self._queue.popleft() if self._queue else None
+        message = self._queue.popleft() if self._queue else None
+        if message:
+            print("[chat] delivering viewer message to Tulpa")
+        return message
 
     def start(self) -> None:
         if self.enabled() and (self._task is None or self._task.done()):
@@ -105,6 +108,7 @@ class ChatClient:
             user, msg = _parse_privmsg(line)
             if user and msg and self._accept_message(user, msg):
                 self._queue.append(f"[chat: {user}: {msg[:500]}]")
+                print(f"[chat] queued message from {user}")
 
     def _accept_message(self, user: str, message: str) -> bool:
         now = time.monotonic()

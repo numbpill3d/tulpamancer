@@ -11,7 +11,7 @@ from utils.config import env_number
 
 class TTSClient:
     def __init__(self):
-        self.voice = os.getenv("TTS_VOICE", "en-US-AnaNeural").strip()
+        self.voice = os.getenv("TTS_VOICE", "en-US-GuyNeural").strip()
         if not self.voice:
             raise ValueError("TTS_VOICE must not be empty")
         self.pitch = os.getenv("TTS_PITCH", "+0Hz")

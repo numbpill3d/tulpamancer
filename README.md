@@ -116,7 +116,7 @@ all values are documented in `.env.example`. optional values use the defaults be
 | `LLM_TIMEOUT` | `60` seconds per provider request |
 | `CHARACTER_NAME` | `Tulpa` |
 | `CHARACTER_SYSTEM_PROMPT` | blank uses built-in persona |
-| `TTS_VOICE` | `en-US-AnaNeural` |
+| `TTS_VOICE` | `en-US-GuyNeural` |
 | `TTS_PITCH`, `TTS_RATE`, `TTS_VOLUME` | `+0Hz`, `-5%`, `+0%`; include sign and unit |
 | `TTS_TIMEOUT` | `60` seconds per synthesis |
 | `VTS_ENABLED` | `1` |
