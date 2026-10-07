@@ -111,7 +111,8 @@ all values are documented in `.env.example`. optional values use the defaults be
 | `LLM_BASE_URL` | known provider endpoint; required for a custom provider |
 | `LLM_MODEL` | Anthropic: `claude-haiku-4-5-20251001`; Ollama: `llama3.2`; Groq: `llama-3.1-8b-instant`; others require a model |
 | `LLM_MAX_TOKENS` | `160` output tokens (not words) |
-| `LLM_MAX_HISTORY` | `20` complete conversation exchanges, minimum 1 |
+| `LLM_MAX_HISTORY` | `8` complete conversation exchanges, minimum 1 |
+| `LLM_RAMBLE_INTERVAL_SECONDS` | `600` seconds between focused autonomous rambles; `0` disables them |
 | `LLM_TIMEOUT` | `60` seconds per provider request |
 | `CHARACTER_NAME` | `Tulpa` |
 | `CHARACTER_SYSTEM_PROMPT` | blank uses built-in persona |

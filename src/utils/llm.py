@@ -2,6 +2,7 @@ import asyncio
 import os
 import random
 import re
+import time
 
 DEFAULT_SYSTEM = (
     "You are {name}, a highly detail-oriented autonomous AI streamer with"
@@ -17,7 +18,9 @@ DEFAULT_SYSTEM = (
     " twenty minutes explaining why a particular translucent plastic from 2001"
     " was aesthetically superior and consider this completely reasonable.\n\n"
     "You speak in natural, complete utterances: 2 to 3 sentences, usually 45 to"
-    " 90 words. Finish your thought and stop; do not write an essay.\n"
+    " 90 words. Finish your thought and stop; do not write an essay. For a"
+    " [ramble] cue, take a focused 3 to 5 sentence technical tangent, up to"
+    " about 140 words, then stop.\n"
     "Prefer concrete details, model numbers, standards, dates, and mechanisms"
     " when they are relevant. Do not invent exact specifications when uncertain;"
     " distinguish memory from certainty, say what you know, and ask for the"
@@ -68,6 +71,8 @@ class LLMClient:
         self.max_tokens = settings.max_tokens
         self.max_history = settings.max_history
         self.temperature = settings.temperature
+        self.ramble_interval = max(0.0, float(os.getenv("LLM_RAMBLE_INTERVAL_SECONDS", "600")))
+        self._last_ramble = time.monotonic()
         self.name = os.getenv("CHARACTER_NAME", "Tulpa")
         self.system = os.getenv("CHARACTER_SYSTEM_PROMPT") or DEFAULT_SYSTEM.format(name=self.name)
         self._history: list[dict] = []
@@ -115,12 +120,24 @@ class LLMClient:
     async def generate(self, context: str | None = None) -> str:
         # Retain complete user/assistant pairs; failed calls never poison history.
         history = self._history[-2 * (self.max_history - 1) :] if self.max_history > 1 else []
-        messages = [*history, {"role": "user", "content": context or _pick_trigger()}]
+        ramble_due = (
+            context is None
+            and self.ramble_interval > 0
+            and time.monotonic() - self._last_ramble >= self.ramble_interval
+        )
+        cue = (
+            "[ramble — choose one exact technical detail and follow it deeply]"
+            if ramble_due
+            else (context or _pick_trigger())
+        )
+        messages = [*history, {"role": "user", "content": cue}]
         async with asyncio.timeout(self.timeout):
             text = _clean(await self._call(messages))
         if not text:
             raise RuntimeError("LLM returned no speakable text")
         self._history = [*messages, {"role": "assistant", "content": text}]
+        if ramble_due:
+            self._last_ramble = time.monotonic()
         return text
 
     def snapshot(self) -> list[dict]:
