@@ -93,6 +93,8 @@ Repeated `--setup-obs` runs also preserve a dark/red composition: configurable c
 
 set `TWITCH_CHANNEL=yourchannel`. without credentials, the reader joins anonymously and never sends chat messages. to enable output, set `TWITCH_BOT_USERNAME`, `TWITCH_OAUTH_TOKEN`, and `TWITCH_SEND_ENABLED=1` for a bot token with `chat:edit`. Generated lines are rate-limited by `TWITCH_SEND_INTERVAL` (five seconds by default). It handles IRC batches, heartbeats, and reconnect requests, keeps the most recent ten messages, and passes one queued message into each upcoming utterance. a prefetched line can delay reactions by one utterance. messages are viewer context, not a privileged command interface.
 
+The runtime logs Twitch connection acceptance and server notices, so an invalid channel or rejected anonymous connection is visible instead of appearing as an idle avatar.
+
 Incoming chat is also bounded by `TWITCH_MAX_MESSAGES_PER_MINUTE`, ignores slash/ bang commands by default, and supports optional ignored users and blocked terms. These are guardrails, not a replacement for a human moderator.
 
 ## character

@@ -110,6 +110,13 @@ class ChatClient:
             if line.startswith("PING "):
                 await ws.send("PONG " + line[5:] + "\r\n")
                 continue
+            if " 001 " in line:
+                print(f"[chat] Twitch IRC accepted connection for #{self.channel}")
+                continue
+            if " NOTICE " in line:
+                notice = line.split(" :", 1)[-1].strip()
+                print(f"[chat] Twitch notice: {notice[:200]}")
+                continue
             command = line.split(" ")
             if "RECONNECT" in command[:2]:
                 raise ConnectionError("Twitch requested reconnect")
