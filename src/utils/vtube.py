@@ -230,9 +230,10 @@ class VTubeClient:
                             for index, (parameter, amplitude) in enumerate(
                                 self.idle_parameters.items()
                             )
-                        }
+                        },
+                        optional=True,
                     )
-                    await asyncio.sleep(0.35)
+                    await asyncio.sleep(0.8)
                     continue
                 await asyncio.sleep(random.uniform(self.fidget_min, self.fidget_max))
                 if self.active and not self._speaking:
@@ -253,22 +254,34 @@ class VTubeClient:
             await asyncio.gather(task, return_exceptions=True)
 
     async def set_mouth(self, value: float) -> None:
-        await self.set_parameters({self.mouth_parameter: round(max(0.0, min(value, 1.0)), 3)})
+        await self.set_parameters(
+            {self.mouth_parameter: round(max(0.0, min(value, 1.0)), 3)}, optional=False
+        )
 
-    async def set_parameters(self, values: dict[str, float]) -> None:
+    async def set_parameters(self, values: dict[str, float], *, optional: bool = False) -> None:
         if not self.active:
             return
-        await self._optional_send(
-            "InjectParameterDataRequest",
-            {
-                "faceFound": False,
-                "mode": "set",
-                "parameterValues": [
-                    {"id": parameter, "value": round(value, 3)}
-                    for parameter, value in values.items()
-                ],
-            },
-        )
+        try:
+            await self._send(
+                "InjectParameterDataRequest",
+                {
+                    "faceFound": False,
+                    "mode": "set",
+                    "parameterValues": [
+                        {"id": parameter, "value": round(value, 3)}
+                        for parameter, value in values.items()
+                    ],
+                },
+            )
+        except Exception as exc:
+            if not optional:
+                print(
+                    "[vtube] InjectParameterDataRequest failed "
+                    f"({type(exc).__name__}); reconnecting next utterance"
+                )
+                await self.disconnect()
+            else:
+                print(f"[vtube] optional motion update skipped ({type(exc).__name__})")
 
     async def disconnect(self) -> None:
         await self.stop_idle_motion()
