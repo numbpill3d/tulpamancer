@@ -14,6 +14,7 @@ class ChatClient:
     def __init__(self):
         self._queue: deque[str] = deque(maxlen=10)
         self._task: asyncio.Task | None = None
+        self._message_event = asyncio.Event()
         self.channel = os.getenv("TWITCH_CHANNEL", "").strip().lower().lstrip("#")
         self.username = os.getenv("TWITCH_BOT_USERNAME", "").strip().lower()
         self.oauth_token = os.getenv("TWITCH_OAUTH_TOKEN", "").strip()
@@ -60,6 +61,13 @@ class ChatClient:
         if message:
             print("[chat] delivering viewer message to Tulpa")
         return message
+
+    async def wait_for_message(self) -> None:
+        """Wake a speech prefetch when a viewer message is waiting."""
+        while not self._queue:
+            await self._message_event.wait()
+            self._message_event.clear()
+        self._message_event.clear()
 
     def start(self) -> None:
         if self.enabled() and (self._task is None or self._task.done()):
@@ -109,6 +117,7 @@ class ChatClient:
             if user and msg and self._accept_message(user, msg):
                 self._queue.append(f"[chat: {user}: {msg[:500]}]")
                 print(f"[chat] queued message from {user}")
+                self._message_event.set()
 
     def _accept_message(self, user: str, message: str) -> bool:
         now = time.monotonic()

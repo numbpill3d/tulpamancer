@@ -133,22 +133,47 @@ async def run_pipeline(settings, llm, tts, vtube, chat, utterances=0, first_cont
         with tempfile.TemporaryDirectory(prefix="tulpamancer-") as directory:
             slots = [Path(directory) / f"{i}.mp3" for i in range(2)]
             slot, completed = 0, 0
+            next_path = slots[slot]
             next_task = asyncio.create_task(
                 prepare_with_retry(
                     llm,
                     tts,
-                    slots[slot],
+                    next_path,
                     settings,
                     first_context if first_context is not None else chat.pop(),
                 )
             )
             try:
                 while not utterances or completed < utterances:
+                    # If a viewer message arrives while an idle line is being
+                    # prefetched, cancel that line and prioritize the viewer.
+                    wait_for_message = getattr(chat, "wait_for_message", None)
+                    message_waiter = None
+                    if next_task is not None and wait_for_message is not None:
+                        candidate = wait_for_message()
+                        if inspect.isawaitable(candidate):
+                            message_waiter = asyncio.create_task(candidate)
+                    if message_waiter is not None:
+                        done, _ = await asyncio.wait(
+                            {next_task, message_waiter},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if message_waiter in done and next_task not in done:
+                            next_task.cancel()
+                            await asyncio.gather(next_task, return_exceptions=True)
+                            next_task = asyncio.create_task(
+                                prepare_with_retry(llm, tts, next_path, settings, chat.pop())
+                            )
+                            continue
+                        if message_waiter not in done:
+                            message_waiter.cancel()
+                            await asyncio.gather(message_waiter, return_exceptions=True)
                     text, frames = await next_task
                     next_task = None
                     if not utterances or completed + 1 < utterances:
+                        next_path = slots[1 - slot]
                         next_task = asyncio.create_task(
-                            prepare_with_retry(llm, tts, slots[1 - slot], settings, chat.pop())
+                            prepare_with_retry(llm, tts, next_path, settings, chat.pop())
                         )
                     if not vtube.active:
                         await vtube.connect()

@@ -17,6 +17,7 @@ class TTSClient:
         self.pitch = os.getenv("TTS_PITCH", "+0Hz")
         self.rate = os.getenv("TTS_RATE", "-5%")
         self.volume = os.getenv("TTS_VOLUME", "+0%")
+        self.retries = env_number("TTS_RETRIES", 2, 1, 4)
         for name, value, unit in (
             ("TTS_PITCH", self.pitch, "Hz"),
             ("TTS_RATE", self.rate, "%"),
@@ -31,20 +32,26 @@ class TTSClient:
             raise ValueError("Cannot synthesize empty speech")
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(suffix=".mp3", dir=path.parent)
-        os.close(fd)
-        try:
-            communicate = edge_tts.Communicate(
-                text=text,
-                voice=self.voice,
-                pitch=self.pitch,
-                rate=self.rate,
-                volume=self.volume,
-            )
-            async with asyncio.timeout(self.timeout):
-                await communicate.save(temporary)
-            if Path(temporary).stat().st_size == 0:
-                raise RuntimeError("TTS returned an empty audio file")
-            os.replace(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        for attempt in range(self.retries):
+            fd, temporary = tempfile.mkstemp(suffix=".mp3", dir=path.parent)
+            os.close(fd)
+            try:
+                communicate = edge_tts.Communicate(
+                    text=text,
+                    voice=self.voice,
+                    pitch=self.pitch,
+                    rate=self.rate,
+                    volume=self.volume,
+                )
+                async with asyncio.timeout(self.timeout):
+                    await communicate.save(temporary)
+                if Path(temporary).stat().st_size == 0:
+                    raise RuntimeError("TTS returned an empty audio file")
+                os.replace(temporary, path)
+                return
+            except Exception:
+                if attempt + 1 >= self.retries:
+                    raise
+                await asyncio.sleep(0.75 * (attempt + 1))
+            finally:
+                Path(temporary).unlink(missing_ok=True)
